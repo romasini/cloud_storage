@@ -4,6 +4,7 @@ import java.net.Socket;
 
 public class NetworkServer {
 
+
     private int port;
     private String rootFolder;
 
