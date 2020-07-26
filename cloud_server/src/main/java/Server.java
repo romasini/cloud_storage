@@ -6,6 +6,7 @@ public class Server {
     public static final String ROOT_FOLDER = "rootFolder";
 
     public static void main(String[] args) {
+
         int port = DEFAULT_PORT;
         String rootFolder = ROOT_FOLDER;
 

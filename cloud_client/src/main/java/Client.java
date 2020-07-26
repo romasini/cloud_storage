@@ -7,6 +7,7 @@ public class Client {
     private static String login;
 
     public static void main(String[] args) {
+
         DataInputStream in = null;
         DataOutputStream out = null;
 

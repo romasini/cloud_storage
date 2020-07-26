@@ -24,6 +24,7 @@ public class ClientHandler {
     }
 
     private void doHandle(Socket socket) {
+
         try {
             out = new DataOutputStream(socket.getOutputStream());
             in = new DataInputStream(socket.getInputStream());
