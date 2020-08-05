@@ -25,8 +25,10 @@ public class Client {
             login = readConsole.readLine().trim();
 
             //отправка логина
-            out.writeUTF("/login");
-            out.writeUTF(login);
+            //out.writeUTF("/login");
+            out.write("/login".getBytes());
+            //out.writeUTF(login);
+            out.write(login.getBytes());
 
             //бесконечный цикл
             String fileName = null;
@@ -41,18 +43,20 @@ public class Client {
 
                 if(temp.equals("/download")){
                     //отправить команду на сервер
-                    out.writeUTF(temp);
+                    //out.writeUTF(temp);
+                    out.write(temp.getBytes());
 
                     System.out.println("Введите имя файла:");
                     fileName = readConsole.readLine();
                     //отправить имя файл, который нужно скачать
-                    out.writeUTF(fileName);
+                    //out.writeUTF(fileName);
+                    out.write(fileName.getBytes());
 
                     System.out.println("Введите имя директории, куда поместить файл:");
                     dirFilename = readConsole.readLine();
 
                     long fileSize = in.readLong();
-
+                    System.out.println(fileSize);
                     //получаем файл и грузим в директорию
                     File dirFile = FileUtility.createDirectory(dirFilename);
                     File loadFile = FileUtility.createFile(dirFile.getAbsolutePath()+"/"+fileName);

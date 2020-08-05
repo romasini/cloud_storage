@@ -5,7 +5,7 @@ public class Server {
     private static final int DEFAULT_PORT = 8189;
     public static final String ROOT_FOLDER = "rootFolder";
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws IOException {
 
         int port = DEFAULT_PORT;
         String rootFolder = ROOT_FOLDER;
@@ -32,7 +32,10 @@ public class Server {
             e.printStackTrace();
         }
 
-        new NetworkServer(port, rootFolder).start();
+        //new NetworkServer(port, rootFolder).start();
+
+        new Thread(new NetworkServerNIO(port, rootFolder)).start();
+
     }
 
 
