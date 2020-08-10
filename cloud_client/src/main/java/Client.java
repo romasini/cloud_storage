@@ -18,5 +18,8 @@ public class Client extends Application {
         Scene scene = new Scene(root);
         primaryStage.setScene(scene);
         primaryStage.show();
+        primaryStage.setOnCloseRequest(e->{
+            System.exit(0);
+        });
     }
 }

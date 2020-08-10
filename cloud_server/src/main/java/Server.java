@@ -22,7 +22,7 @@ public class Server {
             try {
                 rootFolder = args[1];
             }catch (Exception e){
-                System.out.println("Некорректный формат порта, будет использоваться порт по умолчанию");
+                System.out.println("Некорректный формат папки, будет использоваться папка по умолчанию");
             }
         }
 
@@ -32,8 +32,6 @@ public class Server {
             e.printStackTrace();
         }
 
-        //new io.NetworkServer(port, rootFolder).start();
-        //new Thread(new NetworkServerNIO(port, rootFolder)).start();
         new NetworkSeverNetty(port, rootFolder).run();
     }
 
