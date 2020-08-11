@@ -10,8 +10,12 @@ import javafx.scene.layout.AnchorPane;
 
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.List;
 import java.util.ResourceBundle;
+import java.util.stream.Collectors;
 
 public class ClientController  implements Initializable {
 
@@ -42,6 +46,16 @@ public class ClientController  implements Initializable {
     public void initialize(URL location, ResourceBundle resources) {
 
         currentFolder = "clientFolder";
+
+        Path path =  Paths.get(currentFolder);
+        try {
+            List<String> filesList = Files.list(path).map((f)->f.getFileName().toString()).collect(Collectors.toList());
+            ObservableList<String> files = FXCollections.observableArrayList(filesList);
+            listClientFiles.setItems(files);
+        }catch (Exception e){
+            e.printStackTrace();
+        }
+
 
         network = Network.getInstance();
         network.setAuthCallBack(args -> {
@@ -128,6 +142,9 @@ public class ClientController  implements Initializable {
     }
 
     public void btnUploadOnAction(ActionEvent actionEvent) {
+
+
+
     }
 
     public void btnDeleteOnAction(ActionEvent actionEvent) {

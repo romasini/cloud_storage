@@ -5,10 +5,11 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 
 import java.io.RandomAccessFile;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
@@ -20,8 +21,13 @@ public class ServerHandler extends ChannelInboundHandlerAdapter {
     private int lengthInt;
     private String currentFolder, currentFilename;
     private long currentFileLength;
+    private Path downloadFile;
+    private RandomAccessFile aFile;
+    private FileChannel inChannel;
+    private long counter = 0;
+    private int tempCount = 0;
 
-    public ServerHandler(Callback authCallBack,Callback getFileListCallBack,Callback downloadFileCallBack, Callback uploadFileCallBack, Callback errorCallBack) {
+    public ServerHandler(Callback authCallBack, Callback getFileListCallBack, Callback downloadFileCallBack, Callback uploadFileCallBack, Callback errorCallBack) {
         this.authCallBack = authCallBack;
         this.getFileListCallBack = getFileListCallBack;
         this.downloadFileCallBack = downloadFileCallBack;
@@ -81,9 +87,11 @@ public class ServerHandler extends ChannelInboundHandlerAdapter {
 
             if(currentCommand == Command.DOWNLOAD_FILE_PROCESS){
 
-                if (buf.readableBytes() >= 4) {
-                    lengthInt = buf.readInt();
-                    currentStage = JobStage.GET_FILE_NAME;
+                if(currentStage==JobStage.GET_FILE_NAME_LENGTH){
+                    if (buf.readableBytes() >= 4) {
+                        lengthInt = buf.readInt();
+                        currentStage = JobStage.GET_FILE_NAME;
+                    }
                 }
 
                 if(currentStage == JobStage.GET_FILE_NAME){
@@ -99,15 +107,49 @@ public class ServerHandler extends ChannelInboundHandlerAdapter {
                     if (buf.readableBytes() >= 8) {
                         currentFileLength = buf.readLong();
                         currentStage = JobStage.GET_FILE;
+
+                        downloadFile = Paths.get(currentFolder, currentFilename);
+                        aFile = new RandomAccessFile(downloadFile.toFile(), "rw");
+                        inChannel = aFile.getChannel();
+                        counter = 0;
+                        tempCount = 0;
                     }
                 }
 
                 if(currentStage == JobStage.GET_FILE){
-                    Path downloadFile = Paths.get(currentFolder, currentFilename);
-                    RandomAccessFile aFile = new RandomAccessFile(downloadFile.toFile(), "w");
-                    long counter = 0;
-                    while (buf.readableBytes()>0 && counter <= currentFileLength){
 
+                    ByteBuffer byteBuffer = ByteBuffer.allocate(1024);
+                    byte[] fileBytes = null;
+                    while (buf.readableBytes()>0 && counter < currentFileLength){
+                        long tempPackLength = buf.readableBytes();
+
+                        while(tempPackLength>0) {
+                            if(tempPackLength>1024) {
+                                fileBytes = new byte[1024];
+                            }else{
+                                fileBytes = new byte[(int)tempPackLength];
+                            }
+
+                            buf.readBytes(fileBytes);
+
+                            byteBuffer.clear();
+                            byteBuffer.put(fileBytes);
+                            byteBuffer.flip();
+
+                            while (byteBuffer.hasRemaining()) {
+                                tempCount = inChannel.write(byteBuffer);
+                                counter = counter + tempCount;
+                            }
+
+                            tempPackLength = tempPackLength - 1024;
+                        }
+
+                    }
+
+                     if(counter == currentFileLength) {
+                        aFile.close();
+                        currentStage = JobStage.STANDBY;
+                        currentCommand = Command.NO_COMMAND;
                     }
 
                 }

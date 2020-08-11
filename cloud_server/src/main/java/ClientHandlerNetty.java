@@ -25,6 +25,11 @@ public class ClientHandlerNetty extends ChannelInboundHandlerAdapter {
     private JobStage currentStage = JobStage.STANDBY;
     private String currentFilename;
     private long currentFileLength;
+    private Path downloadFile;
+    private RandomAccessFile aFile;
+    private FileChannel inChannel;
+    private long counter = 0;
+    private int tempCount = 0;
 
     public ClientHandlerNetty(String rootFolder, AuthServer authServer) {
         this.rootFolder = rootFolder;
@@ -48,6 +53,9 @@ public class ClientHandlerNetty extends ChannelInboundHandlerAdapter {
                         currentStage = JobStage.GET_FILE_LIST;
                         break;
                     case DOWNLOAD_FILE:
+                        currentStage = JobStage.GET_FILE_NAME_LENGTH;
+                        break;
+                    case UPLOAD_FILE_PROCESS:
                         currentStage = JobStage.GET_FILE_NAME_LENGTH;
                         break;
 
@@ -168,37 +176,44 @@ public class ClientHandlerNetty extends ChannelInboundHandlerAdapter {
                         Path downLoadFile = Paths.get(rootFolder, login, currentFilename);
                         if(Files.exists(downLoadFile)){
 
-                            ByteBuf answer = null;
+                            ByteBuf answer1 = null;
 
                             currentFileLength = Files.size(downLoadFile);
                             byte[] fileNameBytes = downLoadFile.getFileName().toString().getBytes(StandardCharsets.UTF_8);
-                            answer = ByteBufAllocator.DEFAULT.directBuffer(1 +4 + fileNameBytes.length +8);
-                            answer.writeByte(Command.DOWNLOAD_FILE_PROCESS.getCommandCode());
-                            answer.writeInt(fileNameBytes.length);
-                            answer.writeBytes(fileNameBytes);
-                            answer.writeLong(currentFileLength);
-                            ctx.writeAndFlush(answer);
+                            answer1 = ByteBufAllocator.DEFAULT.directBuffer(1 +4 + fileNameBytes.length +8);
+                            answer1.writeByte(Command.DOWNLOAD_FILE_PROCESS.getCommandCode());
+                            answer1.writeInt(fileNameBytes.length);
+                            answer1.writeBytes(fileNameBytes);
+                            answer1.writeLong(currentFileLength);
+                            ctx.writeAndFlush(answer1);
 
-                            RandomAccessFile aFile = new RandomAccessFile(downLoadFile.toFile(), "rw");
+                            RandomAccessFile aFile = new RandomAccessFile(downLoadFile.toFile(), "r");
                             FileChannel inChannel = aFile.getChannel();
                             long counter = 0;
-                            answer = ByteBufAllocator.DEFAULT.directBuffer(1024, 5*1024);
+
+
+                            ByteBuf answer = null;
                             ByteBuffer bufRead = ByteBuffer.allocate(1024);
                             int bytesRead = inChannel.read(bufRead);
                             counter = counter + bytesRead;
                             while (bytesRead != -1 && counter <= currentFileLength) {
+
+                                answer = ByteBufAllocator.DEFAULT.directBuffer(1024, 5*1024);
+
                                 bufRead.flip();
                                 while(bufRead.hasRemaining()){
                                     byte[] fileBytes = new byte[bytesRead];
                                     bufRead.get(fileBytes);
                                     answer.writeBytes(fileBytes);
+                                    ctx.writeAndFlush(answer);
                                 }
-                                buf.clear();
+                                bufRead.clear();
+                                //answer.clear();
                                 bytesRead = inChannel.read(bufRead);
                                 counter = counter + bytesRead;
                             }
                             aFile.close();
-
+                            System.out.println("Файл ушел");
                             currentStage = JobStage.STANDBY;
                             currentCommand = Command.NO_COMMAND;
 
@@ -219,6 +234,76 @@ public class ClientHandlerNetty extends ChannelInboundHandlerAdapter {
                         }
                     }
 
+                }
+
+                if(currentCommand == Command.UPLOAD_FILE_PROCESS){
+
+                    if(currentStage==JobStage.GET_FILE_NAME_LENGTH){
+                        if (buf.readableBytes() >= 4) {
+                            lengthInt = buf.readInt();
+                            currentStage = JobStage.GET_FILE_NAME;
+                        }
+                    }
+
+                    if(currentStage == JobStage.GET_FILE_NAME){
+                        if (buf.readableBytes() >= lengthInt) {
+                            byte[] fileNameByte = new byte[lengthInt];
+                            buf.readBytes(fileNameByte);
+                            currentFilename = new String(fileNameByte, "UTF-8");
+                            currentStage = JobStage.GET_FILE_LENGTH;
+                        }
+                    }
+
+                    if(currentStage == JobStage.GET_FILE_LENGTH){
+                        if (buf.readableBytes() >= 8) {
+                            currentFileLength = buf.readLong();
+                            currentStage = JobStage.GET_FILE;
+
+                            downloadFile = Paths.get(rootFolder, login, currentFilename);
+                            aFile = new RandomAccessFile(downloadFile.toFile(), "rw");
+                            inChannel = aFile.getChannel();
+                            counter = 0;
+                            tempCount = 0;
+                        }
+                    }
+
+                    if(currentStage == JobStage.GET_FILE){
+
+                        ByteBuffer byteBuffer = ByteBuffer.allocate(1024);
+                        byte[] fileBytes = null;
+                        while (buf.readableBytes()>0 && counter < currentFileLength){
+                            long tempPackLength = buf.readableBytes();
+
+                            while(tempPackLength>0) {
+                                if(tempPackLength>1024) {
+                                    fileBytes = new byte[1024];
+                                }else{
+                                    fileBytes = new byte[(int)tempPackLength];
+                                }
+
+                                buf.readBytes(fileBytes);
+
+                                byteBuffer.clear();
+                                byteBuffer.put(fileBytes);
+                                byteBuffer.flip();
+
+                                while (byteBuffer.hasRemaining()) {
+                                    tempCount = inChannel.write(byteBuffer);
+                                    counter = counter + tempCount;
+                                }
+
+                                tempPackLength = tempPackLength - 1024;
+                            }
+
+                        }
+
+                        if(counter == currentFileLength) {
+                            aFile.close();
+                            currentStage = JobStage.STANDBY;
+                            currentCommand = Command.NO_COMMAND;
+                        }
+
+                    }
                 }
 
             }else{
