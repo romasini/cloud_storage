@@ -28,6 +28,7 @@ public class ClientController  implements Initializable {
     private String login;
     private boolean isAuth;
     private String currentFolder;
+    private FileTransfer fileTransfer;
 
     @FXML
     TextField loginText;
@@ -51,8 +52,8 @@ public class ClientController  implements Initializable {
     public void initialize(URL location, ResourceBundle resources) {
 
         currentFolder = "clientFolder";
-
         Path path =  Paths.get(currentFolder);
+
         try {
             List<String> filesList = Files.list(path).map((f)->f.getFileName().toString()).collect(Collectors.toList());
             ObservableList<String> files = FXCollections.observableArrayList(filesList);
@@ -61,15 +62,12 @@ public class ClientController  implements Initializable {
             e.printStackTrace();
         }
 
-
         network = Network.getInstance();
+        fileTransfer = network.getFileTransfer();
+
         network.setAuthCallBack(args -> {
             Platform.runLater(()->{
-                Alert alert = new Alert(Alert.AlertType.INFORMATION);
-                alert.setTitle("Success");
-                alert.setHeaderText(null);
-                alert.setContentText("Клиент авторизован");
-                alert.showAndWait();
+                showMessage(Alert.AlertType.INFORMATION, "Авторизация", "Клиент авторизован");
                 loginPane.setManaged(false);
                 loginPane.setVisible(false);
                 isAuth = true;
@@ -77,7 +75,7 @@ public class ClientController  implements Initializable {
             });
         });
 
-        network.setGetFileListCallBack(args -> {
+        fileTransfer.setGetFileListCallBack(args -> {
             Platform.runLater(()->{
                 List<String> filesList = (List<String>) args[0];
                 ObservableList<String> files = FXCollections.observableArrayList(filesList);
@@ -85,13 +83,9 @@ public class ClientController  implements Initializable {
             });
         });
 
-        network.setErrorCallBack(args -> {
+        fileTransfer.setErrorCallBack(args -> {
             Platform.runLater(()->{
-                Alert alert = new Alert(Alert.AlertType.ERROR);
-                alert.setTitle("Error");
-                alert.setHeaderText(null);
-                alert.setContentText((String) args[0]);
-                alert.showAndWait();
+                showMessage(Alert.AlertType.ERROR, "Ошибка", (String) args[0]);
             });
         });
 
@@ -102,11 +96,7 @@ public class ClientController  implements Initializable {
         login = loginText.getText().trim();
         String password = passText.getText().trim();
         if (login.isEmpty()){
-            Alert alert = new Alert(Alert.AlertType.WARNING);
-            alert.setTitle("Внимание");
-            alert.setHeaderText(null);
-            alert.setContentText("Не заполнен логин");
-            alert.showAndWait();
+            showMessage(Alert.AlertType.WARNING, "Внимание", "Не заполнен логин");
             return;
         }
 
@@ -131,6 +121,10 @@ public class ClientController  implements Initializable {
     }
 
     public void btnDownloadOnAction(ActionEvent actionEvent) {
+
+        if(!isAuth){
+
+        }
 
         String downLoadFile = listServerFiles.getSelectionModel().getSelectedItem();
 
@@ -226,34 +220,28 @@ public class ClientController  implements Initializable {
     }
 
     public void btnDeleteOnAction(ActionEvent actionEvent) {
-
-        String downLoadFile = listServerFiles.getSelectionModel().getSelectedItem();
-
-        //команда
-        ByteBuf buff = null;
-        byte command = Command.DELETE_FILE.getCommandCode();
-        byte[] fileNameBytes = downLoadFile.getBytes(StandardCharsets.UTF_8);
-
-        buff = network.getCurrentChannel().alloc().directBuffer(1+4+fileNameBytes.length);
-        buff.writeByte(command);
-        buff.writeInt(fileNameBytes.length);
-        buff.writeBytes(fileNameBytes);
-        network.getCurrentChannel().writeAndFlush(buff);
-
+        String deleteFile = listServerFiles.getSelectionModel().getSelectedItem();
+        network.getCurrentChannel().writeAndFlush(fileTransfer.requestDeleteFile(deleteFile));
     }
 
     public void btnRefreshOnAction(ActionEvent actionEvent) {
-        getFileListServer();
+        if (isAuth){
+            getFileListServer();
+        }else{
+            showMessage(Alert.AlertType.WARNING,"Внимание", "Клиент не авторизован");
+        }
     }
 
     private void getFileListServer(){
-        if (isAuth){
-            ByteBuf buff = null;
-            byte command = Command.GET_FILE_LIST.getCommandCode();
-            buff = network.getCurrentChannel().alloc().directBuffer(1);
-            buff.writeByte(command);
-            network.getCurrentChannel().writeAndFlush(buff);
-        }
+        network.getCurrentChannel().writeAndFlush(fileTransfer.requestFileList(new String()));
+    }
+
+    private void showMessage(Alert.AlertType type, String title, String message){
+        Alert alert = new Alert(type);
+        alert.setTitle(title);
+        alert.setHeaderText(null);
+        alert.setContentText(message);
+        alert.showAndWait();
     }
 
 }
