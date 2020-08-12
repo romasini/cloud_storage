@@ -50,8 +50,7 @@ public class ServerHandler extends ChannelInboundHandlerAdapter {
                             authCallBack.call();
                         break;
                     case ERROR_SERVER:
-                        if(errorCallBack!=null)
-                            errorCallBack.call();
+                        currentStage =  JobStage.GET_ERROR_LENGTH;
                         break;
                     case RETURN_FILE_LIST:
                         currentStage = JobStage.GET_FILE_LIST_LENGTH;
@@ -59,7 +58,34 @@ public class ServerHandler extends ChannelInboundHandlerAdapter {
                     case DOWNLOAD_FILE_PROCESS:
                         currentStage = JobStage.GET_FILE_NAME_LENGTH;
                         break;
+                    case DELETE_SUCCESS:
+                        currentStage = JobStage.GET_FILE_NAME_LENGTH;
+                        break;
                 }
+            }
+
+            if(currentCommand == Command.ERROR_SERVER){
+                if(currentStage == JobStage.GET_ERROR_LENGTH){
+                    if (buf.readableBytes() >= 4) {
+                        lengthInt = buf.readInt();
+                        currentStage = JobStage.GET_ERROR_MESSAGE;
+                    }
+                }
+
+                if(currentStage == JobStage.GET_ERROR_MESSAGE){
+                    if (buf.readableBytes() >= lengthInt) {
+                        byte[] arrayFilesByte = new byte[lengthInt];
+                        buf.readBytes(arrayFilesByte);
+                        String errorMessage = new String(arrayFilesByte, StandardCharsets.UTF_8);
+
+                        if(errorCallBack!=null)
+                            errorCallBack.call(errorMessage);
+
+                        currentStage = JobStage.STANDBY;
+                        currentCommand = Command.NO_COMMAND;
+                    }
+                }
+
             }
 
             if (currentCommand == Command.RETURN_FILE_LIST){
@@ -153,6 +179,30 @@ public class ServerHandler extends ChannelInboundHandlerAdapter {
                     }
 
                 }
+            }
+
+            if(currentCommand == Command.DELETE_SUCCESS){
+
+                if(currentStage==JobStage.GET_FILE_NAME_LENGTH){
+                    if (buf.readableBytes() >= 4) {
+                        lengthInt = buf.readInt();
+                        currentStage = JobStage.GET_FILE_NAME;
+                    }
+                }
+
+                if(currentStage == JobStage.GET_FILE_NAME){
+                    if (buf.readableBytes() >= lengthInt) {
+                        byte[] fileNameByte = new byte[lengthInt];
+                        buf.readBytes(fileNameByte);
+                        currentFilename = new String(fileNameByte, "UTF-8");
+
+                        System.out.println(currentFilename + " успешно удален");
+
+                        currentStage = JobStage.STANDBY;
+                        currentCommand = Command.NO_COMMAND;
+                    }
+                }
+
             }
 
             if (buf.readableBytes() == 0) {

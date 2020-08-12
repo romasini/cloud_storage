@@ -58,7 +58,8 @@ public class ClientHandlerNetty extends ChannelInboundHandlerAdapter {
                     case UPLOAD_FILE_PROCESS:
                         currentStage = JobStage.GET_FILE_NAME_LENGTH;
                         break;
-
+                    case DELETE_FILE:
+                        currentStage = JobStage.GET_FILE_NAME_LENGTH;
                 }
 
 
@@ -306,6 +307,58 @@ public class ClientHandlerNetty extends ChannelInboundHandlerAdapter {
                     }
                 }
 
+                if(currentCommand == Command.DELETE_FILE){
+                    if(currentStage==JobStage.GET_FILE_NAME_LENGTH){
+                        if (buf.readableBytes() >= 4) {
+                            lengthInt = buf.readInt();
+                            currentStage = JobStage.GET_FILE_NAME;
+                        }
+                    }
+
+                    if(currentStage == JobStage.GET_FILE_NAME){
+                        if (buf.readableBytes() >= lengthInt) {
+                            byte[] fileNameByte = new byte[lengthInt];
+                            buf.readBytes(fileNameByte);
+                            currentFilename = new String(fileNameByte, "UTF-8");
+                            currentStage = JobStage.CHECK_FILE;
+                        }
+                    }
+
+                    if(currentStage == JobStage.CHECK_FILE){
+                        Path deleteFile = Paths.get(rootFolder, login, currentFilename);
+                        if(Files.exists(deleteFile)){
+
+                            Files.delete(deleteFile);
+
+                            ByteBuf answer = null;
+                            byte[] fileNameBytes = deleteFile.getFileName().toString().getBytes(StandardCharsets.UTF_8);
+                            answer = ByteBufAllocator.DEFAULT.directBuffer(1 + 4 + fileNameBytes.length);
+                            answer.writeByte(Command.DELETE_SUCCESS.getCommandCode());
+                            answer.writeInt(fileNameBytes.length);
+                            answer.writeBytes(fileNameBytes);
+                            ctx.writeAndFlush(answer);
+
+                            currentStage = JobStage.STANDBY;
+                            currentCommand = Command.NO_COMMAND;
+
+                        }else{
+                            ByteBuf answer = null;
+                            message = "Файл не найден";
+                            byte[] messageBytes = message.getBytes(StandardCharsets.UTF_8);
+                            answer = ByteBufAllocator.DEFAULT.directBuffer(1 + 4 + messageBytes.length);
+                            answer.writeByte(Command.ERROR_SERVER.getCommandCode());
+                            answer.writeInt(messageBytes.length);
+                            answer.writeBytes(messageBytes);
+                            ctx.writeAndFlush(answer);
+
+                            System.out.println("Файл не найден");
+
+                            currentStage = JobStage.STANDBY;
+                            currentCommand = Command.NO_COMMAND;
+                        }
+                    }
+
+                }
             }else{
                 ByteBuf answer = null;
                 message = "Авторизуйтесь";
