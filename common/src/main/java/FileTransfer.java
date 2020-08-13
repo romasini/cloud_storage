@@ -15,6 +15,7 @@ public class FileTransfer {
 
     private Callback getFileListCallBack;
     private Callback errorCallBack;
+    private Callback deleteFileCallBack;
 
     private Command currentCommand = Command.NO_COMMAND;
     private int simpleLength;
@@ -23,16 +24,12 @@ public class FileTransfer {
         this.getFileListCallBack = getFileListCallBack;
     }
 
-    public Callback getGetFileListCallBack() {
-        return getFileListCallBack;
-    }
-
-    public Callback getErrorCallBack() {
-        return errorCallBack;
-    }
-
     public void setErrorCallBack(Callback errorCallBack) {
         this.errorCallBack = errorCallBack;
+    }
+
+    public void setDeleteFileCallBack(Callback deleteFileCallBack) {
+        this.deleteFileCallBack = deleteFileCallBack;
     }
 
     public ByteBuf sendSimpleMessage(Command command, String message){
@@ -106,6 +103,36 @@ public class FileTransfer {
         return  sendSimpleMessage(Command.DELETE_FILE, fileName);
     }
 
+    public JobStage returnDeleteFile(ByteBuf buf, JobStage currentStage){
 
+        if(currentStage==JobStage.GET_FILE_NAME_LENGTH){
+            if (buf.readableBytes() >= intLength) {
+                simpleLength = buf.readInt();
+                currentStage = JobStage.GET_FILE_NAME;
+            }
+        }
+
+        if(currentStage == JobStage.GET_FILE_NAME){
+
+            if (buf.readableBytes() >= simpleLength) {
+                byte[] fileNameByte = new byte[simpleLength];
+                buf.readBytes(fileNameByte);
+                String fileName = new String(fileNameByte, StandardCharsets.UTF_8);
+
+                if(deleteFileCallBack != null){
+                    deleteFileCallBack.call(fileName);
+                }
+
+                currentStage = JobStage.STANDBY;
+            }
+
+        }
+
+        return currentStage;
+    }
+
+    public ByteBuf requestDownloadFile(String filename){
+        return sendSimpleMessage(Command.DOWNLOAD_FILE, filename);
+    }
 
 }

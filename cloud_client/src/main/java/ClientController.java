@@ -75,6 +75,12 @@ public class ClientController  implements Initializable {
             });
         });
 
+        fileTransfer.setErrorCallBack(args -> {
+            Platform.runLater(()->{
+                showMessage(Alert.AlertType.ERROR, "Ошибка", (String) args[0]);
+            });
+        });
+
         fileTransfer.setGetFileListCallBack(args -> {
             Platform.runLater(()->{
                 List<String> filesList = (List<String>) args[0];
@@ -83,9 +89,10 @@ public class ClientController  implements Initializable {
             });
         });
 
-        fileTransfer.setErrorCallBack(args -> {
+        fileTransfer.setDeleteFileCallBack(args -> {
             Platform.runLater(()->{
-                showMessage(Alert.AlertType.ERROR, "Ошибка", (String) args[0]);
+                showMessage(Alert.AlertType.INFORMATION, "Удаление", "Фйал " + args[0] + " удален");
+                getFileListServer();
             });
         });
 
@@ -123,25 +130,21 @@ public class ClientController  implements Initializable {
     public void btnDownloadOnAction(ActionEvent actionEvent) {
 
         if(!isAuth){
-
+            showMessage(Alert.AlertType.WARNING,"Внимание", "Клиент не авторизован");
+            return;
         }
 
         String downLoadFile = listServerFiles.getSelectionModel().getSelectedItem();
-
-        //команда
-        ByteBuf buff = null;
-        byte command = Command.DOWNLOAD_FILE.getCommandCode();
-        byte[] fileNameBytes = downLoadFile.getBytes(StandardCharsets.UTF_8);
-
-        buff = network.getCurrentChannel().alloc().directBuffer(1+4+fileNameBytes.length);
-        buff.writeByte(command);
-        buff.writeInt(fileNameBytes.length);
-        buff.writeBytes(fileNameBytes);
-        network.getCurrentChannel().writeAndFlush(buff);
+        network.getCurrentChannel().writeAndFlush(fileTransfer.sendSimpleMessage(Command.DOWNLOAD_FILE, downLoadFile));
 
     }
 
     public void btnUploadOnAction(ActionEvent actionEvent) {
+
+        if(!isAuth){
+            showMessage(Alert.AlertType.WARNING,"Внимание", "Клиент не авторизован");
+            return;
+        }
 
         Path uploadFile = Paths.get(currentFolder, listClientFiles.getSelectionModel().getSelectedItem());
 
@@ -220,6 +223,10 @@ public class ClientController  implements Initializable {
     }
 
     public void btnDeleteOnAction(ActionEvent actionEvent) {
+        if(!isAuth){
+            showMessage(Alert.AlertType.WARNING,"Внимание", "Клиент не авторизован");
+            return;
+        }
         String deleteFile = listServerFiles.getSelectionModel().getSelectedItem();
         network.getCurrentChannel().writeAndFlush(fileTransfer.requestDeleteFile(deleteFile));
     }

@@ -38,7 +38,7 @@ public class ServerHandler extends ChannelInboundHandlerAdapter {
         ByteBuf buf = ((ByteBuf) msg);
         while (buf.readableBytes() > 0) {
             //определение входящей команды
-            if (currentStage == JobStage.STANDBY) {
+            if(currentStage == JobStage.STANDBY) {
                 currentCommand = CommandUtility.getCommand(buf.readByte());
 
                 switch (currentCommand) {
@@ -118,27 +118,7 @@ public class ServerHandler extends ChannelInboundHandlerAdapter {
             }
 
             if(currentCommand == Command.DELETE_SUCCESS){
-
-                if(currentStage==JobStage.GET_FILE_NAME_LENGTH){
-                    if (buf.readableBytes() >= 4) {
-                        lengthInt = buf.readInt();
-                        currentStage = JobStage.GET_FILE_NAME;
-                    }
-                }
-
-                if(currentStage == JobStage.GET_FILE_NAME){
-                    if (buf.readableBytes() >= lengthInt) {
-                        byte[] fileNameByte = new byte[lengthInt];
-                        buf.readBytes(fileNameByte);
-                        currentFilename = new String(fileNameByte, "UTF-8");
-
-                        System.out.println(currentFilename + " успешно удален");
-
-                        currentStage = JobStage.STANDBY;
-                        currentCommand = Command.NO_COMMAND;
-                    }
-                }
-
+                currentStage = fileTransfer.returnDeleteFile(buf, currentStage);
             }
 
             if (buf.readableBytes() == 0) {

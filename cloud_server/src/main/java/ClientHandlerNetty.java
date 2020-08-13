@@ -3,6 +3,7 @@ import io.netty.buffer.ByteBufAllocator;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 
+import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
@@ -50,8 +51,8 @@ public class ClientHandlerNetty extends ChannelInboundHandlerAdapter {
         while (buf.readableBytes() > 0) {
             //определение входящей команды
             if (currentStage == JobStage.STANDBY){
+                currentCommand = Command.NO_COMMAND;
                 currentCommand = CommandUtility.getCommand(buf.readByte());
-
                 switch (currentCommand){
                     case AUTHORIZATION:
                         currentStage = JobStage.GET_LENGTH_LOGIN;
@@ -68,7 +69,6 @@ public class ClientHandlerNetty extends ChannelInboundHandlerAdapter {
                     case DELETE_FILE:
                         currentStage = JobStage.GET_FILE_NAME_LENGTH;
                 }
-
 
             }
 
@@ -120,6 +120,7 @@ public class ClientHandlerNetty extends ChannelInboundHandlerAdapter {
 
                         } else {
                             message = "Ошибка авторизации";
+
                             byte[] messageBytes = message.getBytes(StandardCharsets.UTF_8);
 
                             answer = ByteBufAllocator.DEFAULT.directBuffer(1 + 4 + messageBytes.length);
@@ -142,23 +143,13 @@ public class ClientHandlerNetty extends ChannelInboundHandlerAdapter {
 
                     if (currentCommand == Command.GET_FILE_LIST) {
                         if (currentStage == JobStage.GET_FILE_LIST) {
+
                             Path path = Paths.get(rootFolder, login);
                             String filesList = Files.list(path).map((f) -> f.getFileName().toString()).collect(Collectors.joining("/", "", ""));
-                            ByteBuf answer = null;
-
-                            byte[] messageBytes = filesList.getBytes(StandardCharsets.UTF_8);
-                            answer = ByteBufAllocator.DEFAULT.directBuffer(1 + 4 + messageBytes.length);
-                            answer.writeByte(Command.RETURN_FILE_LIST.getCommandCode());
-                            answer.writeInt(messageBytes.length);
-                            //сделать цикл по пакетам
-                            answer.writeBytes(messageBytes);
-
-                            ctx.writeAndFlush(answer);
+                            ctx.writeAndFlush(fileTransfer.sendSimpleMessage(Command.RETURN_FILE_LIST, filesList));
+                            currentStage = JobStage.STANDBY;
 
                             System.out.println("Послали список файлов");
-
-                            currentStage = JobStage.STANDBY;
-                            currentCommand = Command.NO_COMMAND;
 
                         }
                     }
@@ -314,33 +305,23 @@ public class ClientHandlerNetty extends ChannelInboundHandlerAdapter {
                             Path deleteFile = Paths.get(rootFolder, login, currentFilename);
                             if (Files.exists(deleteFile)) {
 
-                                Files.delete(deleteFile);
-
-                                ByteBuf answer = null;
-                                byte[] fileNameBytes = deleteFile.getFileName().toString().getBytes(StandardCharsets.UTF_8);
-                                answer = ByteBufAllocator.DEFAULT.directBuffer(1 + 4 + fileNameBytes.length);
-                                answer.writeByte(Command.DELETE_SUCCESS.getCommandCode());
-                                answer.writeInt(fileNameBytes.length);
-                                answer.writeBytes(fileNameBytes);
-                                ctx.writeAndFlush(answer);
-
                                 currentStage = JobStage.STANDBY;
-                                currentCommand = Command.NO_COMMAND;
+
+                                try {
+                                    Files.delete(deleteFile);
+                                    ctx.writeAndFlush(fileTransfer.sendSimpleMessage(Command.DELETE_SUCCESS, deleteFile.getFileName().toString()));
+                                    System.out.println("Файл удален");
+                                } catch (IOException e) {
+                                    ctx.writeAndFlush(fileTransfer.sendSimpleMessage(Command.ERROR_SERVER, "Ошибка удаления файла"));
+                                    System.out.println("Ошибка удаления" + e.getMessage());
+                                }
 
                             } else {
-                                ByteBuf answer = null;
-                                message = "Файл не найден";
-                                byte[] messageBytes = message.getBytes(StandardCharsets.UTF_8);
-                                answer = ByteBufAllocator.DEFAULT.directBuffer(1 + 4 + messageBytes.length);
-                                answer.writeByte(Command.ERROR_SERVER.getCommandCode());
-                                answer.writeInt(messageBytes.length);
-                                answer.writeBytes(messageBytes);
-                                ctx.writeAndFlush(answer);
 
+                                ctx.writeAndFlush(fileTransfer.sendSimpleMessage(Command.ERROR_SERVER, "Файл не найден"));
+                                currentStage = JobStage.STANDBY;
                                 System.out.println("Файл не найден");
 
-                                currentStage = JobStage.STANDBY;
-                                currentCommand = Command.NO_COMMAND;
                             }
                         }
 
@@ -348,19 +329,11 @@ public class ClientHandlerNetty extends ChannelInboundHandlerAdapter {
 
                 } else {
 
-                    ByteBuf answer = null;
-                    message = "Авторизуйтесь";
-                    byte[] messageBytes = message.getBytes(StandardCharsets.UTF_8);
-                    answer = ByteBufAllocator.DEFAULT.directBuffer(1 + 4 + messageBytes.length);
-                    answer.writeByte(Command.ERROR_SERVER.getCommandCode());
-                    answer.writeInt(messageBytes.length);
-                    answer.writeBytes(messageBytes);
-                    ctx.writeAndFlush(answer);
-
-                    System.out.println("Неразрешенный действия");
-
+                    ctx.writeAndFlush(fileTransfer.sendSimpleMessage(Command.ERROR_SERVER, "Авторизуйтесь"));
                     currentStage = JobStage.STANDBY;
-                    currentCommand = Command.NO_COMMAND;
+
+                    System.out.println("Неразрешенные действия");
+
                 }
             }
         }
