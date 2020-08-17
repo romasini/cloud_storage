@@ -1,6 +1,7 @@
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
 import javafx.application.Platform;
+import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.event.ActionEvent;
@@ -8,6 +9,7 @@ import javafx.fxml.FXML;
 import javafx.fxml.Initializable;
 import javafx.scene.control.*;
 import javafx.scene.layout.AnchorPane;
+import javafx.scene.layout.HBox;
 
 import java.io.IOException;
 import java.io.RandomAccessFile;
@@ -40,30 +42,46 @@ public class ClientController  implements Initializable {
     Button btnLogin;
 
     @FXML
-    AnchorPane loginPane;
+    HBox loginPane;
 
     @FXML
-    ListView<String> listServerFiles;
+    TableView<FileInfo> listServerFiles;
 
     @FXML
-    ListView<String> listClientFiles;
+    TableView<FileInfo> listClientFiles;
 
     @Override
     public void initialize(URL location, ResourceBundle resources) {
 
+        TableColumn<FileInfo, String> fileTypeColumn = new TableColumn<>();
+        fileTypeColumn.setCellValueFactory(param->new SimpleStringProperty(param.getValue().getType().getName()));
+        fileTypeColumn.setPrefWidth(24);
+
+        TableColumn<FileInfo, String> fileNameColumn = new TableColumn<>("Имя файла");
+        fileNameColumn.setCellValueFactory(param->new SimpleStringProperty(param.getValue().getFilename()));
+        fileNameColumn.setPrefWidth(240);
+
+        listClientFiles.getColumns().add(fileTypeColumn);
+        listClientFiles.getColumns().add(fileNameColumn);
+
+        listServerFiles.getColumns().add(fileTypeColumn);
+        listServerFiles.getColumns().add(fileNameColumn);
+
         currentFolder = "clientFolder";
         Path path =  Paths.get(currentFolder);
+        updateList(path);
 
-        try {
-            List<String> filesList = Files.list(path).map((f)->f.getFileName().toString()).collect(Collectors.toList());
-            ObservableList<String> files = FXCollections.observableArrayList(filesList);
-            listClientFiles.setItems(files);
-        }catch (Exception e){
-            e.printStackTrace();
-        }
+//        try {
+//            List<String> filesList = Files.list(path).map((f)->f.getFileName().toString()).collect(Collectors.toList());
+//            ObservableList<String> files = FXCollections.observableArrayList(filesList);
+//            listClientFiles.setItems(files);
+//        }catch (Exception e){
+//            e.printStackTrace();
+//        }
 
         network = Network.getInstance();
         fileTransfer = network.getFileTransfer();
+        fileTransfer.setCurrentFolder(currentFolder);
 
         network.setAuthCallBack(args -> {
             Platform.runLater(()->{
@@ -81,21 +99,45 @@ public class ClientController  implements Initializable {
             });
         });
 
+        fileTransfer.setInformationCallBack(args -> {
+            Platform.runLater(()->{
+                showMessage(Alert.AlertType.INFORMATION, "Информация", (String) args[0]);
+            });
+        });
+
+        fileTransfer.setUploadFileCallBack(args -> {
+            Platform.runLater(()->{
+                showMessage(Alert.AlertType.INFORMATION, "Выгрузка", "Файл " + args[0] + " выгружен");
+                getFileListServer();
+            });
+        });
+
         fileTransfer.setGetFileListCallBack(args -> {
             Platform.runLater(()->{
                 List<String> filesList = (List<String>) args[0];
                 ObservableList<String> files = FXCollections.observableArrayList(filesList);
-                listServerFiles.setItems(files);
+                //listServerFiles.setItems(files);
             });
         });
 
         fileTransfer.setDeleteFileCallBack(args -> {
             Platform.runLater(()->{
-                showMessage(Alert.AlertType.INFORMATION, "Удаление", "Фйал " + args[0] + " удален");
+                showMessage(Alert.AlertType.INFORMATION, "Удаление", "Файл " + args[0] + " удален");
                 getFileListServer();
             });
         });
 
+    }
+
+    public void updateList(Path path){
+        //4422
+        try {
+            listClientFiles.getItems().clear();
+            listClientFiles.getItems().addAll(Files.list(path).map(FileInfo::new).collect(Collectors.toList()));
+            listClientFiles.sort();
+        } catch (IOException e) {
+            showMessage(Alert.AlertType.ERROR, "Ошибка", "Ошибка чтения файлов");
+        }
     }
 
     public void btnLoginOnAction(ActionEvent actionEvent) {
@@ -134,8 +176,9 @@ public class ClientController  implements Initializable {
             return;
         }
 
-        String downLoadFile = listServerFiles.getSelectionModel().getSelectedItem();
-        network.getCurrentChannel().writeAndFlush(fileTransfer.sendSimpleMessage(Command.DOWNLOAD_FILE, downLoadFile));
+        //String downLoadFile = listServerFiles.getSelectionModel().getSelectedItem();
+        String downLoadFile = new String();
+        network.getCurrentChannel().writeAndFlush(fileTransfer.requestDownloadFile(downLoadFile));
 
     }
 
@@ -146,79 +189,16 @@ public class ClientController  implements Initializable {
             return;
         }
 
-        Path uploadFile = Paths.get(currentFolder, listClientFiles.getSelectionModel().getSelectedItem());
+        //ByteBuf buff = fileTransfer.requestUploadFile(listClientFiles.getSelectionModel().getSelectedItem());
+        ByteBuf buff = fileTransfer.requestUploadFile(new String());
 
-        if(!Files.exists(uploadFile)){
-            Alert alert = new Alert(Alert.AlertType.WARNING);
-            alert.setTitle("Внимание");
-            alert.setHeaderText(null);
-            alert.setContentText("Файл не найден");
-            alert.showAndWait();
+        if(buff == null){
             return;
         }
 
-        long currentFileLength = 0;
-
-        try {
-            currentFileLength = Files.size(uploadFile);
-        } catch (IOException e) {
-            Alert alert = new Alert(Alert.AlertType.WARNING);
-            alert.setTitle("Внимание");
-            alert.setHeaderText(null);
-            alert.setContentText("Ошибка определения размера файла");
-            alert.showAndWait();
-            return;
-        }
-
-        //команда
-        ByteBuf buff = null;
-        byte command = Command.UPLOAD_FILE_PROCESS.getCommandCode();
-        byte[] fileNameBytes = uploadFile.getFileName().toString().getBytes(StandardCharsets.UTF_8);
-
-        buff = network.getCurrentChannel().alloc().directBuffer(1+4+fileNameBytes.length+8);
-        buff.writeByte(command);
-        buff.writeInt(fileNameBytes.length);
-        buff.writeBytes(fileNameBytes);
-        buff.writeLong(currentFileLength);
         network.getCurrentChannel().writeAndFlush(buff);
 
-        try {
-            RandomAccessFile aFile = new RandomAccessFile(uploadFile.toFile(), "r");
-            FileChannel inChannel = aFile.getChannel();
-            long counter = 0;
-
-
-            ByteBuf answer = null;
-            ByteBuffer bufRead = ByteBuffer.allocate(1024);
-            int bytesRead = inChannel.read(bufRead);
-            counter = counter + bytesRead;
-            while (bytesRead != -1 && counter <= currentFileLength) {
-
-                answer = ByteBufAllocator.DEFAULT.directBuffer(1024, 5*1024);
-
-                bufRead.flip();
-                while(bufRead.hasRemaining()){
-                    byte[] fileBytes = new byte[bytesRead];
-                    bufRead.get(fileBytes);
-                    answer.writeBytes(fileBytes);
-                    network.getCurrentChannel().writeAndFlush(answer);
-                }
-                bufRead.clear();
-                //answer.clear();
-                bytesRead = inChannel.read(bufRead);
-                counter = counter + bytesRead;
-            }
-            aFile.close();
-
-            Alert alert = new Alert(Alert.AlertType.INFORMATION);
-            alert.setTitle("Внимание");
-            alert.setHeaderText(null);
-            alert.setContentText("Файл отправлен");
-            alert.showAndWait();
-            return;
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+        fileTransfer.sendingUploadFile(network.getCurrentChannel());
 
     }
 
@@ -227,7 +207,8 @@ public class ClientController  implements Initializable {
             showMessage(Alert.AlertType.WARNING,"Внимание", "Клиент не авторизован");
             return;
         }
-        String deleteFile = listServerFiles.getSelectionModel().getSelectedItem();
+        //String deleteFile = listServerFiles.getSelectionModel().getSelectedItem();
+        String deleteFile = new String();
         network.getCurrentChannel().writeAndFlush(fileTransfer.requestDeleteFile(deleteFile));
     }
 

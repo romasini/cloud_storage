@@ -32,6 +32,7 @@ public class NetworkSeverNetty {
                         }
                     });
             ChannelFuture f = b.bind(port).sync();
+            System.out.println("Сервер запущен");
             f.channel().closeFuture().sync();
         } finally {
             workerGroup.shutdownGracefully();
