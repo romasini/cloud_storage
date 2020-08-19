@@ -1,15 +1,19 @@
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
 import javafx.application.Platform;
+import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.event.ActionEvent;
+import javafx.event.EventHandler;
 import javafx.fxml.FXML;
 import javafx.fxml.Initializable;
 import javafx.scene.control.*;
+import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.AnchorPane;
 import javafx.scene.layout.HBox;
+import javafx.util.Callback;
 
 import java.io.IOException;
 import java.io.RandomAccessFile;
@@ -17,9 +21,8 @@ import java.net.URL;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.nio.file.*;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.ResourceBundle;
 import java.util.stream.Collectors;
@@ -31,9 +34,13 @@ public class ClientController  implements Initializable {
     private boolean isAuth;
     private String currentFolder;
     private FileTransfer fileTransfer;
+    private AuthTransfer authTransfer;
 
     @FXML
     TextField loginText;
+
+    @FXML
+    TextField pathField;
 
     @FXML
     PasswordField passText;
@@ -50,40 +57,56 @@ public class ClientController  implements Initializable {
     @FXML
     TableView<FileInfo> listClientFiles;
 
+    @FXML
+    ProgressBar progress;
+
+    @FXML
+    ComboBox<String> diskBox;
+
     @Override
     public void initialize(URL location, ResourceBundle resources) {
 
-        TableColumn<FileInfo, String> fileTypeColumn = new TableColumn<>();
-        fileTypeColumn.setCellValueFactory(param->new SimpleStringProperty(param.getValue().getType().getName()));
-        fileTypeColumn.setPrefWidth(24);
+        initializeTableView(listClientFiles);
+        initializeTableView(listServerFiles);
 
-        TableColumn<FileInfo, String> fileNameColumn = new TableColumn<>("Имя файла");
-        fileNameColumn.setCellValueFactory(param->new SimpleStringProperty(param.getValue().getFilename()));
-        fileNameColumn.setPrefWidth(240);
-
-        listClientFiles.getColumns().add(fileTypeColumn);
-        listClientFiles.getColumns().add(fileNameColumn);
-
-        listServerFiles.getColumns().add(fileTypeColumn);
-        listServerFiles.getColumns().add(fileNameColumn);
+        listClientFiles.setOnMouseClicked(new EventHandler<MouseEvent>() {
+            @Override
+            public void handle(MouseEvent event) {
+                if(event.getClickCount() == 2){
+                    Path newPath = Paths.get(pathField.getText()).resolve(listClientFiles.getSelectionModel().getSelectedItem().getFilename());
+                    if(Files.isDirectory(newPath)){
+                        updateList(newPath);
+                        currentFolder = newPath.getFileName().toString();
+                    }
+                }
+            }
+        });
 
         currentFolder = "clientFolder";
         Path path =  Paths.get(currentFolder);
-        updateList(path);
+        if(!Files.exists(path)){
+            try {
+                Files.createDirectory(path);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
 
-//        try {
-//            List<String> filesList = Files.list(path).map((f)->f.getFileName().toString()).collect(Collectors.toList());
-//            ObservableList<String> files = FXCollections.observableArrayList(filesList);
-//            listClientFiles.setItems(files);
-//        }catch (Exception e){
-//            e.printStackTrace();
-//        }
+        diskBox.getItems().clear();
+        for(Path p : FileSystems.getDefault().getRootDirectories()){
+            diskBox.getItems().add(p.toString());
+        }
+        diskBox.getSelectionModel().select(0);
+
+        updateList(path);
 
         network = Network.getInstance();
         fileTransfer = network.getFileTransfer();
         fileTransfer.setCurrentFolder(currentFolder);
 
-        network.setAuthCallBack(args -> {
+        authTransfer = network.getAuthTransfer();
+
+        authTransfer.setLogInCallback(args -> {
             Platform.runLater(()->{
                 showMessage(Alert.AlertType.INFORMATION, "Авторизация", "Клиент авторизован");
                 loginPane.setManaged(false);
@@ -112,11 +135,19 @@ public class ClientController  implements Initializable {
             });
         });
 
+        fileTransfer.setDownloadFileCallBack(args -> {
+            Platform.runLater(()->{
+                showMessage(Alert.AlertType.INFORMATION, "Загрузка", "Файл " + args[0] + " загружен");
+                updateList(Paths.get(currentFolder));
+            });
+        });
+
         fileTransfer.setGetFileListCallBack(args -> {
             Platform.runLater(()->{
                 List<String> filesList = (List<String>) args[0];
-                ObservableList<String> files = FXCollections.observableArrayList(filesList);
-                //listServerFiles.setItems(files);
+                listServerFiles.getItems().clear();
+                listServerFiles.getItems().addAll(filesList.stream().map(FileInfo::new).collect(Collectors.toList()));
+                listServerFiles.sort();
             });
         });
 
@@ -127,17 +158,70 @@ public class ClientController  implements Initializable {
             });
         });
 
+        fileTransfer.setProgressBarCallBack(args -> {
+            Platform.runLater(()->{
+                progress.setProgress(args[0]);
+            });
+        });
+
     }
 
     public void updateList(Path path){
-        //4422
+
         try {
+            pathField.setText(path.normalize().toAbsolutePath().toString());
             listClientFiles.getItems().clear();
             listClientFiles.getItems().addAll(Files.list(path).map(FileInfo::new).collect(Collectors.toList()));
             listClientFiles.sort();
         } catch (IOException e) {
             showMessage(Alert.AlertType.ERROR, "Ошибка", "Ошибка чтения файлов");
         }
+    }
+
+    private void initializeTableView(TableView<FileInfo> tableView){
+        TableColumn<FileInfo, String> fileTypeColumn = new TableColumn<>();
+        fileTypeColumn.setCellValueFactory(param->new SimpleStringProperty(param.getValue().getType().getName()));
+        fileTypeColumn.setPrefWidth(24);
+
+        TableColumn<FileInfo, String> fileNameColumn = new TableColumn<>("Имя файла");
+        fileNameColumn.setCellValueFactory(param->new SimpleStringProperty(param.getValue().getFilename()));
+        fileNameColumn.setPrefWidth(240);
+
+        TableColumn<FileInfo, Long> fileSizeColumn = new TableColumn<>("Размер");
+        fileSizeColumn.setCellValueFactory(param -> new SimpleObjectProperty<>(param.getValue().getSize()));
+        fileSizeColumn.setPrefWidth(120);
+
+        fileSizeColumn.setCellFactory(column->{
+            return  new TableCell<FileInfo,Long>(){
+                @Override
+                protected void updateItem(Long item, boolean empty) {
+                    if(item == null || empty){
+                        setText(null);
+                        setStyle("");
+                    }else{
+                        String text = String.format("%,d bytes", item);
+                        if(item == -1L){
+                            text = "[DIR]";
+                        }
+                        setText(text);
+                    }
+                }
+            };
+        });
+
+//        DateTimeFormatter dateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+//
+//        TableColumn<FileInfo, String> fileDateColumn = new TableColumn<>("Дата изменения");
+//        fileDateColumn.setCellValueFactory(param -> new SimpleStringProperty(param.getValue().getLastModified().format(dateTimeFormatter)));
+//        fileDateColumn.setPrefWidth(50);
+
+        //tableView.getColumns().addAll(fileTypeColumn, fileNameColumn, fileSizeColumn, fileDateColumn);
+        tableView.getColumns().addAll(fileTypeColumn, fileNameColumn, fileSizeColumn);
+        tableView.getSortOrder().add(fileTypeColumn);
+
+
+
+
     }
 
     public void btnLoginOnAction(ActionEvent actionEvent) {
@@ -149,19 +233,11 @@ public class ClientController  implements Initializable {
             return;
         }
 
-        //команда
-        ByteBuf buff = null;
-        byte command = Command.AUTHORIZATION.getCommandCode();
-        byte[] loginBytes = login.getBytes(StandardCharsets.UTF_8);
-        byte[] passBytes = password.getBytes(StandardCharsets.UTF_8);
+        network.getCurrentChannel().writeAndFlush(authTransfer.requestSingIn(login, password));
 
-        buff = network.getCurrentChannel().alloc().directBuffer(1+4+loginBytes.length+4+passBytes.length);
-        buff.writeByte(command);
-        buff.writeInt(loginBytes.length);
-        buff.writeBytes(loginBytes);
-        buff.writeInt(passBytes.length);
-        buff.writeBytes(passBytes);
-        network.getCurrentChannel().writeAndFlush(buff);
+    }
+
+    public void mnUnLogin(ActionEvent actionEvent) {
 
     }
 
@@ -176,8 +252,10 @@ public class ClientController  implements Initializable {
             return;
         }
 
-        //String downLoadFile = listServerFiles.getSelectionModel().getSelectedItem();
-        String downLoadFile = new String();
+        progress.progressProperty().unbind();
+        progress.setProgress(0);
+        fileTransfer.setCurrentFolder(currentFolder);
+        String downLoadFile = listServerFiles.getFocusModel().getFocusedItem().getFilename();
         network.getCurrentChannel().writeAndFlush(fileTransfer.requestDownloadFile(downLoadFile));
 
     }
@@ -189,8 +267,10 @@ public class ClientController  implements Initializable {
             return;
         }
 
-        //ByteBuf buff = fileTransfer.requestUploadFile(listClientFiles.getSelectionModel().getSelectedItem());
-        ByteBuf buff = fileTransfer.requestUploadFile(new String());
+        progress.progressProperty().unbind();
+        progress.setProgress(0);
+        fileTransfer.setCurrentFolder(currentFolder);
+        ByteBuf buff = fileTransfer.requestUploadFile(listClientFiles.getFocusModel().getFocusedItem().getFilename());
 
         if(buff == null){
             return;
@@ -198,7 +278,7 @@ public class ClientController  implements Initializable {
 
         network.getCurrentChannel().writeAndFlush(buff);
 
-        fileTransfer.sendingUploadFile(network.getCurrentChannel());
+        new Thread(()->{fileTransfer.sendingUploadFile(network.getCurrentChannel());}).start();
 
     }
 
@@ -207,8 +287,7 @@ public class ClientController  implements Initializable {
             showMessage(Alert.AlertType.WARNING,"Внимание", "Клиент не авторизован");
             return;
         }
-        //String deleteFile = listServerFiles.getSelectionModel().getSelectedItem();
-        String deleteFile = new String();
+        String deleteFile = listServerFiles.getFocusModel().getFocusedItem().getFilename();
         network.getCurrentChannel().writeAndFlush(fileTransfer.requestDeleteFile(deleteFile));
     }
 
@@ -231,5 +310,43 @@ public class ClientController  implements Initializable {
         alert.setContentText(message);
         alert.showAndWait();
     }
+
+    public void btnDeleteClientOnAction(ActionEvent actionEvent) {
+        Path path = Paths.get(currentFolder, listClientFiles.getFocusModel().getFocusedItem().getFilename());
+        if(Files.exists(path)){
+            try {
+                Files.delete(path);
+            } catch (IOException e) {
+                showMessage(Alert.AlertType.ERROR, "Ошибка", "Ошибка при удалении файла");
+                e.printStackTrace();
+            }
+        }
+
+        updateList(Paths.get(currentFolder));
+    }
+
+    public void btnRefreshClientOnAction(ActionEvent actionEvent) {
+        updateList(Paths.get(currentFolder));
+    }
+
+    public void btnPathUpAction(ActionEvent actionEvent) {
+        Path upperPath = Paths.get(pathField.getText()).getParent();
+        if(upperPath != null){
+            updateList(upperPath);
+            currentFolder = upperPath.toString();
+        }
+    }
+
+    public void selectDiskOnAction(ActionEvent actionEvent) {
+        ComboBox<String> element = (ComboBox<String>)actionEvent.getSource();
+        updateList(Paths.get(element.getSelectionModel().getSelectedItem()));
+        currentFolder = element.getSelectionModel().getSelectedItem();
+    }
+
+    public void closeProgram(ActionEvent actionEvent) {
+        network.stop();
+        Platform.exit();
+    }
+
 
 }

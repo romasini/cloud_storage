@@ -37,6 +37,7 @@ public class NetworkSeverNetty {
         } finally {
             workerGroup.shutdownGracefully();
             bossGroup.shutdownGracefully();
+            authServer.closeConnection();
         }
 
 

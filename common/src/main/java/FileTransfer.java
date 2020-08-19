@@ -1,7 +1,8 @@
+import callback.Callback;
+import callback.DoubleCallback;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
 import io.netty.channel.Channel;
-import javafx.scene.control.Alert;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -9,6 +10,7 @@ import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -35,11 +37,16 @@ public class FileTransfer {
     private Callback errorCallBack;
     private Callback deleteFileCallBack;
     private Callback uploadFileCallBack;
+    private Callback downloadFileCallBack;
     private Callback informationCallBack;
-    private Callback progressBarCallBack;
+    private DoubleCallback progressBarCallBack;
 
     private Command currentCommand = Command.NO_COMMAND;
     private int simpleLength;
+
+    public String getCurrentFilename() {
+        return currentFilename;
+    }
 
     public void closeFile(){
         if(aFile != null){
@@ -67,12 +74,16 @@ public class FileTransfer {
         this.informationCallBack = informationCallBack;
     }
 
-    public void setProgressBarCallBack(Callback progressBarCallBack) {
+    public void setProgressBarCallBack(DoubleCallback progressBarCallBack) {
         this.progressBarCallBack = progressBarCallBack;
     }
 
     public void setUploadFileCallBack(Callback uploadFileCallBack) {
         this.uploadFileCallBack = uploadFileCallBack;
+    }
+
+    public void setDownloadFileCallBack(Callback downloadFileCallBack) {
+        this.downloadFileCallBack = downloadFileCallBack;
     }
 
     public void callInformationCallBack(String message){
@@ -89,6 +100,12 @@ public class FileTransfer {
 
     public void setDeleteFileCallBack(Callback deleteFileCallBack) {
         this.deleteFileCallBack = deleteFileCallBack;
+    }
+
+    private void callProgressBar(long current, long size){
+        if(progressBarCallBack != null && size != 0){
+            progressBarCallBack.call((double) current/size);
+        }
     }
 
     public ByteBuf sendSimpleMessage(Command command, String message){
@@ -190,6 +207,43 @@ public class FileTransfer {
         return currentStage;
     }
 
+    public JobStage readFileName(ByteBuf buf, JobStage currentStage){
+
+        if(currentStage==JobStage.GET_FILE_NAME_LENGTH){
+            if (buf.readableBytes() >= intLength) {
+                simpleLength = buf.readInt();
+                currentStage = JobStage.GET_FILE_NAME;
+            }
+        }
+
+        if(currentStage == JobStage.GET_FILE_NAME){
+
+            if (buf.readableBytes() >= simpleLength) {
+                byte[] fileNameByte = new byte[simpleLength];
+                buf.readBytes(fileNameByte);
+                currentFilename = new String(fileNameByte, StandardCharsets.UTF_8);
+                currentStage = JobStage.CHECK_FILE;
+            }
+
+        }
+
+        return currentStage;
+    }
+
+    public JobStage checkFile(JobStage currentStage){
+
+        if (currentStage == JobStage.CHECK_FILE) {
+            Path downloadUploadFile = Paths.get(currentFolder, currentFilename);
+            if(Files.exists(downloadUploadFile)){
+                currentStage = JobStage.START_FILE_OPERATION;
+            }else{
+                currentStage = JobStage.STANDBY;
+            }
+
+        }
+        return currentStage;
+    }
+
     public ByteBuf requestDownloadFile(String filename){
         return sendSimpleMessage(Command.DOWNLOAD_FILE, filename);
     }
@@ -241,16 +295,19 @@ public class FileTransfer {
 
         if(currentStage == JobStage.GET_FILE){
 
-
             while (buf.readableBytes()>0 && counter < fileLength){
                 tempCount = inChannel.write(buf.nioBuffer());
                 counter = counter + tempCount;
                 buf.readerIndex(buf.readerIndex() + tempCount);//-> buf.readableBytes()=0
+                callProgressBar(counter, fileLength);
             }
 
             if(counter == fileLength) {
                 aFile.close();
                 currentStage = JobStage.STANDBY;
+                if(downloadFileCallBack != null){
+                    downloadFileCallBack.call(currentFilename);
+                }
             }
         }
 
@@ -319,6 +376,7 @@ public class FileTransfer {
                 bufRead.clear();
                 bytesRead = inChannel.read(bufRead);
                 counter = counter + bytesRead;
+                callProgressBar(counter, fileLength);
             }
 
             if(uploadFileCallBack != null){
@@ -336,9 +394,35 @@ public class FileTransfer {
             }
         }
 
+    }
 
+    public ByteBuf sendDownloadFile(){
 
+        downloadUploadFile = Paths.get(currentFolder, currentFilename);
+        try {
+            fileLength = Files.size(downloadUploadFile);
+        } catch (IOException e) {
 
+            return null;
+        }
+
+        byte[] fileNameBytes = downloadUploadFile.getFileName().toString().getBytes(StandardCharsets.UTF_8);
+        ByteBuf buff = ByteBufAllocator.DEFAULT.directBuffer(byteLength + intLength + fileNameBytes.length + longLength);
+        buff.writeByte(Command.DOWNLOAD_FILE_PROCESS.getCommandCode());
+        buff.writeInt(fileNameBytes.length);
+        buff.writeBytes(fileNameBytes);
+        buff.writeLong(fileLength);
+
+        try {
+            aFile = new RandomAccessFile(downloadUploadFile.toFile(), "r");
+            inChannel = aFile.getChannel();
+            counter = 0l;
+        } catch (FileNotFoundException e) {
+            return null;
+        }
+
+        return buff;
 
     }
+
 }

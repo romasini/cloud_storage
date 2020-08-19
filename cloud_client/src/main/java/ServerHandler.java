@@ -3,30 +3,17 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 
 import java.io.IOException;
-import java.io.RandomAccessFile;
-import java.nio.channels.FileChannel;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.util.Arrays;
-import java.util.List;
 
 public class ServerHandler extends ChannelInboundHandlerAdapter {
 
     private FileTransfer fileTransfer;
-    private Callback authCallBack, downloadFileCallBack, uploadFileCallBack, errorCallBack;
+    private AuthTransfer authTransfer;
     private Command currentCommand = Command.NO_COMMAND;
     private JobStage currentStage = JobStage.STANDBY;
-    private String currentFolder, currentFilename;
-    private long currentFileLength;
-    private Path downloadFile;
 
-    public ServerHandler(FileTransfer fileTransfer, Callback authCallBack, Callback downloadFileCallBack, Callback uploadFileCallBack) {
+    public ServerHandler(FileTransfer fileTransfer, AuthTransfer authTransfer) {
         this.fileTransfer = fileTransfer;
-        this.authCallBack = authCallBack;
-        this.downloadFileCallBack = downloadFileCallBack;
-        this.uploadFileCallBack = uploadFileCallBack;
-        this.currentFolder = "clientFolder";
+        this.authTransfer = authTransfer;
     }
 
     @Override
@@ -39,8 +26,7 @@ public class ServerHandler extends ChannelInboundHandlerAdapter {
 
                 switch (currentCommand) {
                     case SUCCESS_AUTH:
-                        if(authCallBack!=null)
-                            authCallBack.call();
+                        authTransfer.callLogInCallback();
                         break;
                     case ERROR_SERVER:
                         currentStage =  JobStage.GET_ERROR_LENGTH;
@@ -55,6 +41,7 @@ public class ServerHandler extends ChannelInboundHandlerAdapter {
                         currentStage = JobStage.GET_FILE_NAME_LENGTH;
                         break;
                 }
+
             }
 
             if(currentCommand == Command.ERROR_SERVER){
@@ -71,6 +58,7 @@ public class ServerHandler extends ChannelInboundHandlerAdapter {
 
                 try {
                     currentStage = fileTransfer.readFile(buf, currentStage);
+
                 } catch (IOException e) {
                     e.printStackTrace();
                     fileTransfer.callErrorCallBack("Ошибка загрузки файла");
@@ -95,4 +83,5 @@ public class ServerHandler extends ChannelInboundHandlerAdapter {
         cause.printStackTrace();
         ctx.close();
     }
+
 }
