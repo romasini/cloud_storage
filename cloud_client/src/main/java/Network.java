@@ -15,39 +15,30 @@ public class Network {
 
     private String serverName;
     private int serverPort;
+    private FileTransfer fileTransfer;
+    private AuthTransfer authTransfer;
+    private final static Network ourInstance = new Network();
     private Channel currentChannel;
-    private static Network ourInstance = new Network();
-    private Callback authCallBack, getFileListCallBack, downloadFileCallBack, uploadFileCallBack, errorCallBack;
-
-    public void setGetFileListCallBack(Callback getFileListCallBack) {
-        this.getFileListCallBack = getFileListCallBack;
-    }
-
-    public void setAuthCallBack(Callback authCallBack) {
-        this.authCallBack = authCallBack;
-    }
-
-    public void setErrorCallBack(Callback errorCallBack) {
-        this.errorCallBack = errorCallBack;
-    }
-
-    public void setDownloadFileCallBack(Callback downloadFileCallBack) {
-        this.downloadFileCallBack = downloadFileCallBack;
-    }
-
-    public void setUploadFileCallBack(Callback uploadFileCallBack) {
-        this.uploadFileCallBack = uploadFileCallBack;
-    }
 
     private Network(String serverName, int serverPort) {
         this.serverName = serverName;
         this.serverPort = serverPort;
+        this.fileTransfer = new FileTransfer();
+        this.authTransfer = new AuthTransfer();
         new Thread(()-> start()).start();
     }
 
     private Network() {
         //по возможности загружать настройки из файла типа properties
         this("localhost",8189);
+    }
+
+    public FileTransfer getFileTransfer() {
+        return fileTransfer;
+    }
+
+    public AuthTransfer getAuthTransfer() {
+        return authTransfer;
     }
 
     public static Network getInstance() {
@@ -68,7 +59,7 @@ public class Network {
                     .handler(new ChannelInitializer<SocketChannel>() {
                         protected void initChannel(SocketChannel socketChannel) throws Exception {
                             currentChannel = socketChannel;
-                            socketChannel.pipeline().addLast(new ServerHandler(authCallBack, getFileListCallBack, downloadFileCallBack, uploadFileCallBack, errorCallBack));
+                            socketChannel.pipeline().addLast(new ServerHandler(fileTransfer, authTransfer));
                         }
                     });
             ChannelFuture channelFuture = clientBootstrap.connect().sync();
